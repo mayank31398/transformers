@@ -33,7 +33,6 @@ from ...modeling_outputs import (
     CausalLMOutputWithPast,
 )
 from ...modeling_utils import PreTrainedModel
-from ...pytorch_utils import ALL_LAYERNORM_LAYERS
 from ...utils import (
     add_code_sample_docstrings,
     add_start_docstrings,
@@ -111,30 +110,6 @@ _CHECKPOINT_FOR_DOC = "meta/chameleon-7b"
 _EXPECTED_OUTPUT_SHAPE = [1, 7, 4096]
 _SEQ_CLASS_EXPECTED_LOSS = 1.03
 _SEQ_CLASS_EXPECTED_OUTPUT = "'LABEL_0'"
-
-
-# Copied from transformers.models.llama.modeling_llama.LlamaRMSNorm with Llama->Chameleon
-class ChameleonRMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-6):
-        """
-        ChameleonRMSNorm is equivalent to T5LayerNorm
-        """
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.variance_epsilon = eps
-
-    def forward(self, hidden_states):
-        input_dtype = hidden_states.dtype
-        hidden_states = hidden_states.to(torch.float32)
-        variance = hidden_states.pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        return self.weight * hidden_states.to(input_dtype)
-
-    def extra_repr(self):
-        return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
-
-
-ALL_LAYERNORM_LAYERS.append(ChameleonRMSNorm)
 
 
 # copied from transformers.models.llama.modeling_llama.LlamaRotaryEmbedding with Llama->Chameleon
@@ -648,8 +623,8 @@ class ChameleonDecoderLayer(nn.Module):
         self.self_attn = CHAMELEON_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
 
         self.mlp = ChameleonMLP(config)
-        self.input_layernorm = ChameleonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = ChameleonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.input_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -723,8 +698,8 @@ class ChameleonSwinDecoderLayer(nn.Module):
         self.self_attn = CHAMELEON_ATTENTION_CLASSES[config._attn_implementation](config=config, layer_idx=layer_idx)
 
         self.mlp = ChameleonMLP(config)
-        self.input_layernorm = ChameleonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = ChameleonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.input_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
         self,
@@ -1267,7 +1242,7 @@ class ChameleonModel(ChameleonPreTrainedModel):
         self.layers = nn.ModuleList(
             [decoder_layer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
-        self.norm = ChameleonRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.vqmodel = ChameleonVQVAE(config.vq_config)
         self.gradient_checkpointing = False
 
