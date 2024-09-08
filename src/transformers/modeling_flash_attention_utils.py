@@ -19,19 +19,23 @@ from typing import Optional, Tuple
 
 import torch
 import torch.nn.functional as F
+import logging
 
 from .utils import is_flash_attn_2_available, is_flash_attn_3_available, is_flash_attn_greater_or_equal
-from .utils.logging import warning_once
+
+logger = logging.getLogger(__name__)
 
 
-if is_flash_attn_2_available():
-    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
-    from flash_attn import flash_attn_func, flash_attn_varlen_func
+if is_flash_attn_3_available():
+    logger.warning_once("using Flash Attention 3")
 
-    _flash_supports_window_size = "window_size" in list(inspect.signature(flash_attn_func).parameters)
-elif is_flash_attn_3_available():
     from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
     from flash_attn_interface import flash_attn_func, flash_attn_varlen_func
+
+    _flash_supports_window_size = "window_size" in list(inspect.signature(flash_attn_func).parameters)
+elif is_flash_attn_2_available():
+    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # noqa
+    from flash_attn import flash_attn_func, flash_attn_varlen_func
 
     _flash_supports_window_size = False
 
