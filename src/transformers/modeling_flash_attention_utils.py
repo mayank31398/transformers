@@ -20,7 +20,8 @@ from typing import Optional, Tuple
 import torch
 import torch.nn.functional as F
 
-from .utils import is_flash_attn_2_available, is_flash_attn_greater_or_equal
+from .utils import is_flash_attn_2_available, is_flash_attn_3_available, is_flash_attn_greater_or_equal
+from .utils.logging import warning_once
 
 
 if is_flash_attn_2_available():
@@ -28,6 +29,10 @@ if is_flash_attn_2_available():
     from flash_attn import flash_attn_func, flash_attn_varlen_func
 
     _flash_supports_window_size = "window_size" in list(inspect.signature(flash_attn_func).parameters)
+elif is_flash_attn_3_available():
+    from flash_attn_interface import flash_attn_func, flash_attn_varlen_func
+
+    _flash_supports_window_size = False
 
 
 def _get_unpad_data(attention_mask: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, int]:
@@ -232,12 +237,15 @@ def _flash_attention_forward(
     )
     flash_kwargs = {"window_size": (sliding_window, sliding_window)} if use_sliding_windows else {}
 
-    if is_flash_attn_greater_or_equal("2.4.1"):
+    is_flash_attention_3 = is_flash_attn_greater_or_equal("3.0.0")
+
+    if is_flash_attention_3 or is_flash_attn_greater_or_equal("2.4.1"):
         if deterministic is None:
             deterministic = os.environ.get("FLASH_ATTENTION_DETERMINISTIC", "0") == "1"
         flash_kwargs["deterministic"] = deterministic
 
     if softcap is not None:
+        assert is_flash_attention_3, "softcapping is not supported with Flash Attention 3"
         flash_kwargs["softcap"] = softcap
 
     # Contains at least one padding token in the sequence
@@ -249,19 +257,36 @@ def _flash_attention_forward(
         cu_seqlens_q, cu_seqlens_k = cu_seq_lens
         max_seqlen_in_batch_q, max_seqlen_in_batch_k = max_seq_lens
 
-        attn_output_unpad = flash_attn_varlen_func(
-            query_states,
-            key_states,
-            value_states,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_k=cu_seqlens_k,
-            max_seqlen_q=max_seqlen_in_batch_q,
-            max_seqlen_k=max_seqlen_in_batch_k,
-            dropout_p=dropout,
-            softmax_scale=softmax_scale,
-            causal=causal,
-            **flash_kwargs,
-        )
+        if is_flash_attention_3:
+            warning_once("setting dropout to 0 since Flash Attention 3 doesn't support attention dropout")
+
+            attn_output_unpad = flash_attn_varlen_func(
+                query_states,
+                key_states,
+                value_states,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_k=cu_seqlens_k,
+                max_seqlen_q=max_seqlen_in_batch_q,
+                max_seqlen_k=max_seqlen_in_batch_k,
+                softmax_scale=softmax_scale,
+                causal=causal,
+                **flash_kwargs,
+            )
+        else:
+            attn_output_unpad = flash_attn_varlen_func(
+                query_states,
+                key_states,
+                value_states,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_k=cu_seqlens_k,
+                max_seqlen_q=max_seqlen_in_batch_q,
+                max_seqlen_k=max_seqlen_in_batch_k,
+                dropout_p=dropout,
+                softmax_scale=softmax_scale,
+                causal=causal,
+                **flash_kwargs,
+            )
+
         attn_output = pad_input(attn_output_unpad, indices_q, batch_size, query_length)
 
     # If position_ids is provided and check all examples do not contain only 1 sequence, If tensor in increasing
@@ -276,25 +301,54 @@ def _flash_attention_forward(
         cu_seqlens_q, cu_seqlens_k = cu_seq_lens
         max_seqlen_in_batch_q, max_seqlen_in_batch_k = max_seq_lens
 
-        attn_output = flash_attn_varlen_func(
-            query_states,
-            key_states,
-            value_states,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_k=cu_seqlens_k,
-            max_seqlen_q=max_seqlen_in_batch_q,
-            max_seqlen_k=max_seqlen_in_batch_k,
-            dropout_p=dropout,
-            softmax_scale=softmax_scale,
-            causal=causal,
-            **flash_kwargs,
-        )
+        if is_flash_attention_3:
+            warning_once("setting dropout to 0 since Flash Attention 3 doesn't support attention dropout")
+
+            attn_output = flash_attn_varlen_func(
+                query_states,
+                key_states,
+                value_states,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_k=cu_seqlens_k,
+                max_seqlen_q=max_seqlen_in_batch_q,
+                max_seqlen_k=max_seqlen_in_batch_k,
+                softmax_scale=softmax_scale,
+                causal=causal,
+                **flash_kwargs,
+            )
+        else:
+            attn_output = flash_attn_varlen_func(
+                query_states,
+                key_states,
+                value_states,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_k=cu_seqlens_k,
+                max_seqlen_q=max_seqlen_in_batch_q,
+                max_seqlen_k=max_seqlen_in_batch_k,
+                dropout_p=dropout,
+                softmax_scale=softmax_scale,
+                causal=causal,
+                **flash_kwargs,
+            )
 
         attn_output = attn_output.view(batch_size, -1, attn_output.size(-2), attn_output.size(-1))
 
     else:
-        attn_output = flash_attn_func(
-            query_states, key_states, value_states, dropout, softmax_scale=softmax_scale, causal=causal, **flash_kwargs
-        )
+        if is_flash_attention_3:
+            warning_once("setting dropout to 0 since Flash Attention 3 doesn't support attention dropout")
+
+            attn_output = flash_attn_func(
+                query_states, key_states, value_states, softmax_scale=softmax_scale, causal=causal, **flash_kwargs
+            )
+        else:
+            attn_output = flash_attn_func(
+                query_states,
+                key_states,
+                value_states,
+                dropout,
+                softmax_scale=softmax_scale,
+                causal=causal,
+                **flash_kwargs,
+            )
 
     return attn_output

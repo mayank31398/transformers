@@ -878,6 +878,25 @@ def is_flash_attn_2_available():
         return False
 
 
+def is_flash_attn_3_available():
+    if not is_torch_available():
+        return False
+
+    if not _is_package_available("flash_attn_interface"):
+        return False
+
+    # Let's add an extra check to see if cuda is available
+    import torch
+
+    if not torch.cuda.is_available():
+        return False
+
+    if torch.version.cuda:
+        return version.parse(importlib.metadata.version("flash_attn")) >= version.parse("3.0.0")
+    else:
+        return False
+
+
 def is_flash_attn_greater_or_equal_2_10():
     if not _is_package_available("flash_attn"):
         return False
