@@ -347,7 +347,7 @@ class GraniteAttention(nn.Module):
         return attn_output, attn_weights, past_key_value
 
 
-class GraniteFlashAttention2(GraniteAttention):
+class GraniteFlashAttention(GraniteAttention):
     """
     Granite flash attention module. This module inherits from `GraniteAttention` as the weights of the module stays
     untouched. The only required change would be on the forward pass where it needs to correctly call the public API of
@@ -546,7 +546,8 @@ class GraniteSdpaAttention(GraniteAttention):
 
 GRANITE_ATTENTION_CLASSES = {
     "eager": GraniteAttention,
-    "flash_attention_2": GraniteFlashAttention2,
+    "flash_attention_2": GraniteFlashAttention,
+    "flash_attention_3": GraniteFlashAttention,
     "sdpa": GraniteSdpaAttention,
 }
 

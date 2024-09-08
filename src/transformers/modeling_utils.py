@@ -1763,15 +1763,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             if importlib.util.find_spec("flash_attn_interface") is None:
                 raise ImportError(f"{preface} the package flash_attn seems to be not installed. {install_message}")
 
-            flash_attention_version = version.parse(importlib.metadata.version("flash_attn"))
-            if torch.version.cuda:
-                if flash_attention_version < version.parse("2.1.0"):
-                    raise ImportError(
-                        f"{preface} you need flash_attn package version to be greater or equal than 2.1.0. Detected version {flash_attention_version}. {install_message}"
-                    )
-                else:
-                    raise ImportError(f"{preface} Flash Attention 2 is not available. {install_message}")
-
         _is_bettertransformer = getattr(cls, "use_bettertransformer", False)
 
         if _is_bettertransformer:
