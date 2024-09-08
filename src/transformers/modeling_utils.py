@@ -82,6 +82,7 @@ from .utils import (
     is_accelerate_available,
     is_bitsandbytes_available,
     is_flash_attn_2_available,
+    is_flash_attn_3_available,
     is_offline_mode,
     is_optimum_available,
     is_peft_available,
@@ -1559,8 +1560,16 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             )
             config._attn_implementation = "flash_attention_2"
 
-        if config._attn_implementation in ["flash_attention_2", "flash_attention_3"]:
+        if config._attn_implementation == "flash_attention_2":
             cls._check_and_enable_flash_attn_2(
+                config,
+                torch_dtype=torch_dtype,
+                device_map=device_map,
+                hard_check_only=False,
+                check_device_map=check_device_map,
+            )
+        if config._attn_implementation == "flash_attention_3":
+            cls._check_and_enable_flash_attn_3(
                 config,
                 torch_dtype=torch_dtype,
                 device_map=device_map,
@@ -1724,6 +1733,89 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             )
         if not hard_check_only:
             config._attn_implementation = "flash_attention_2"
+        return config
+
+    @classmethod
+    def _check_and_enable_flash_attn_3(
+        cls,
+        config,
+        torch_dtype: Optional[torch.dtype] = None,
+        device_map: Optional[Union[str, Dict[str, int]]] = None,
+        check_device_map: bool = True,
+        hard_check_only: bool = False,
+    ) -> PretrainedConfig:
+        """
+        Checks the availability of Flash Attention 2 and compatibility with the current model.
+
+        If all checks pass and `hard_check_only` is False, the method will set the config attribute `attn_implementation` to "flash_attention_2" so that the model can initialize the correct attention module.
+        """
+        if not cls._supports_flash_attn_2:
+            raise ValueError(
+                f"{cls.__name__} does not support Flash Attention 3.0 yet. Please request to add support where"
+                f" the model is hosted, on its model hub page: https://huggingface.co/{config._name_or_path}/discussions/new"
+                " or in the Transformers GitHub repo: https://github.com/huggingface/transformers/issues/new"
+            )
+
+        if not is_flash_attn_3_available():
+            preface = "FlashAttention3 has been toggled on, but it cannot be used due to the following error:"
+            install_message = "Please install Flash Attention 3."
+
+            if importlib.util.find_spec("flash_attn_interface") is None:
+                raise ImportError(f"{preface} the package flash_attn seems to be not installed. {install_message}")
+
+            flash_attention_version = version.parse(importlib.metadata.version("flash_attn"))
+            if torch.version.cuda:
+                if flash_attention_version < version.parse("2.1.0"):
+                    raise ImportError(
+                        f"{preface} you need flash_attn package version to be greater or equal than 2.1.0. Detected version {flash_attention_version}. {install_message}"
+                    )
+                else:
+                    raise ImportError(f"{preface} Flash Attention 2 is not available. {install_message}")
+
+        _is_bettertransformer = getattr(cls, "use_bettertransformer", False)
+
+        if _is_bettertransformer:
+            raise ValueError(
+                "Flash Attention 3 and BetterTransformer API are not compatible. Please make sure to disable BetterTransformers by doing model.reverse_bettertransformer()"
+            )
+
+        if torch_dtype is None:
+            logger.warning_once(
+                "You are attempting to use Flash Attention 3.0 without specifying a torch dtype. This might lead to unexpected behaviour"
+            )
+        elif torch_dtype is not None and torch_dtype not in [torch.float16, torch.bfloat16]:
+            logger.warning_once(
+                "Flash Attention 3.0 only supports torch.float16 and torch.bfloat16 dtypes, but"
+                f" the current dype in {cls.__name__} is {torch_dtype}. You should run training or inference using Automatic Mixed-Precision via the `with torch.autocast(device_type='torch_device'):` decorator,"
+                ' or load the model with the `torch_dtype` argument. Example: `model = AutoModel.from_pretrained("openai/whisper-tiny", attn_implementation="flash_attention_2", torch_dtype=torch.float16)`'
+            )
+
+        # The check `torch.empty(0).device.type != "cuda"` is needed as the model may be initialized after `torch.set_default_device` has been called,
+        # or the model may be initialized under the context manager `with torch.device("cuda"):`.
+        if check_device_map and device_map is None and torch.empty(0).device.type != "cuda":
+            if torch.cuda.is_available():
+                logger.warning_once(
+                    "You are attempting to use Flash Attention 3.0 with a model not initialized on GPU. Make sure to move the model to GPU"
+                    " after initializing it on CPU with `model.to('cuda')`."
+                )
+            else:
+                raise ValueError(
+                    "You are attempting to use Flash Attention 3.0 with a model not initialized on GPU and with no GPU available. "
+                    "This is not supported yet. Please make sure to have access to a GPU and either initialise the model on a GPU by passing a device_map "
+                    "or initialising the model on CPU and then moving it to GPU."
+                )
+        elif (
+            check_device_map
+            and device_map is not None
+            and isinstance(device_map, dict)
+            and ("cpu" in device_map.values() or "disk" in device_map.values())
+        ):
+            raise ValueError(
+                "You are attempting to use Flash Attention 3.0 with a model dispatched on CPU or disk. This is not supported. Please make sure to "
+                "initialise the model on a GPU by passing a device_map that contains only GPU devices as keys."
+            )
+        if not hard_check_only:
+            config._attn_implementation = "flash_attention_3"
         return config
 
     @classmethod
