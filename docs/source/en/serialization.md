@@ -130,7 +130,7 @@ Alternative to CLI, you can export a 🤗 Transformers model to ONNX programmati
 >>> from optimum.onnxruntime import ORTModelForSequenceClassification
 >>> from transformers import AutoTokenizer
 
->>> model_checkpoint = "distilbert_base_uncased_squad"
+>>> model_checkpoint = "distilbert/distilbert-base-uncased-distilled-squad"
 >>> save_directory = "onnx/"
 
 >>> # Load a model from transformers and export it to ONNX
@@ -153,11 +153,11 @@ directly.
 
 <Tip warning={true}>
 
-`tranformers.onnx` is no longer maintained, please export models with 🤗 Optimum as described above. This section will be removed in the future versions.
+`transformers.onnx` is no longer maintained, please export models with 🤗 Optimum as described above. This section will be removed in the future versions.
 
 </Tip>
 
-To export a 🤗 Transformers model to ONNX with `tranformers.onnx`, install extra dependencies:
+To export a 🤗 Transformers model to ONNX with `transformers.onnx`, install extra dependencies:
 
 ```bash
 pip install transformers[onnx]
